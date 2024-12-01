@@ -25,14 +25,15 @@ import (
 )
 
 const (
-	isPartOfNumberFlag = 1 << iota
-	isFloatOnlyFlag
-	isMinusFlag
-	isEOVFlag
-	isDigitFlag
-	isMustHaveDigitNext
+	isPartOfNumberFlag  = 1 << iota // 标记数字的一部分
+	isFloatOnlyFlag                 // 标记仅为浮点数
+	isMinusFlag                     // 标记负号
+	isEOVFlag                       // 标记结束值
+	isDigitFlag                     // 标记数字
+	isMustHaveDigitNext             // 标记必须有下一个数字
 )
 
+// isNumberRune 数组用于标识每个字符是否为数字的一部分
 var isNumberRune = [256]uint8{
 	'0':  isPartOfNumberFlag | isDigitFlag,
 	'1':  isPartOfNumberFlag | isDigitFlag,
@@ -59,91 +60,92 @@ var isNumberRune = [256]uint8{
 	':':  isEOVFlag,
 }
 
-// parseNumber will parse the number starting in the buffer.
-// Any non-number characters at the end will be ignored.
-// Returns TagEnd if no valid value found be found.
+// parseNumber 将解析从缓冲区开始的数字。
+// 任何非数字字符将被忽略。
+// 如果未找到有效值，则返回 TagEnd。
 func parseNumber(buf []byte) (id, val uint64) {
-	pos := 0
-	found := uint8(0)
+	pos := 0          // 当前解析位置
+	found := uint8(0) // 标记找到的类型
 	for i, v := range buf {
-		t := isNumberRune[v]
+		t := isNumberRune[v] // 获取当前字符的标记
 		if t == 0 {
-			//fmt.Println("aborting on", string(v), "in", string(buf[:i]))
+			// 如果字符不是数字的一部分，返回 0
 			return 0, 0
 		}
 		if t == isEOVFlag {
-			break
+			break // 遇到结束标记，停止解析
 		}
 		if t&isMustHaveDigitNext > 0 {
-			// A period and minus must be followed by a digit
+			// 如果是小数点或负号，必须后面跟一个数字
 			if len(buf) < i+2 || isNumberRune[buf[i+1]]&isDigitFlag == 0 {
-				return 0, 0
+				return 0, 0 // 如果没有跟随数字，返回 0
 			}
 		}
-		found |= t
-		pos = i + 1
+		found |= t  // 更新找到的标记
+		pos = i + 1 // 更新当前解析位置
 	}
 	if pos == 0 {
-		return 0, 0
+		return 0, 0 // 如果没有找到有效数字，返回 0
 	}
-	const maxIntLen = 20
-	floatTag := uint64(TagFloat) << JSONTAGOFFSET
+	const maxIntLen = 20                          // 最大整数长度
+	floatTag := uint64(TagFloat) << JSONTAGOFFSET // 浮点数标记
 
-	// Only try integers if we didn't find any float exclusive and it can fit in an integer.
+	// 仅在未找到浮点数且可以适应整数时尝试解析整数
 	if found&isFloatOnlyFlag == 0 && pos <= maxIntLen {
 		if found&isMinusFlag == 0 {
 			if pos > 1 && buf[0] == '0' {
-				// Integers cannot have a leading zero.
+				// 整数不能有前导零
 				return 0, 0
 			}
 		} else {
 			if pos > 2 && buf[1] == '0' {
-				// Integers cannot have a leading zero after minus.
+				// 负数后面不能有前导零
 				return 0, 0
 			}
 		}
-		i64, err := strconv.ParseInt(unsafeBytesToString(buf[:pos]), 10, 64)
+		i64, err := strconv.ParseInt(unsafeBytesToString(buf[:pos]), 10, 64) // 尝试解析为整数
 		if err == nil {
-			return uint64(TagInteger) << JSONTAGOFFSET, uint64(i64)
+			return uint64(TagInteger) << JSONTAGOFFSET, uint64(i64) // 返回整数标记和值
 		}
 		if errors.Is(err, strconv.ErrRange) {
-			floatTag |= uint64(FloatOverflowedInteger)
+			floatTag |= uint64(FloatOverflowedInteger) // 标记为溢出整数
 		}
 
 		if found&isMinusFlag == 0 {
-			u64, err := strconv.ParseUint(unsafeBytesToString(buf[:pos]), 10, 64)
+			u64, err := strconv.ParseUint(unsafeBytesToString(buf[:pos]), 10, 64) // 尝试解析为无符号整数
 			if err == nil {
-				return uint64(TagUint) << JSONTAGOFFSET, u64
+				return uint64(TagUint) << JSONTAGOFFSET, u64 // 返回无符号整数标记和值
 			}
 			if errors.Is(err, strconv.ErrRange) {
-				floatTag |= uint64(FloatOverflowedInteger)
+				floatTag |= uint64(FloatOverflowedInteger) // 标记为溢出整数
 			}
 		}
 	} else if found&isFloatOnlyFlag == 0 {
-		floatTag |= uint64(FloatOverflowedInteger)
+		floatTag |= uint64(FloatOverflowedInteger) // 标记为溢出整数
 	}
 
 	if pos > 1 && buf[0] == '0' && isNumberRune[buf[1]]&isFloatOnlyFlag == 0 {
-		// Float can only have have a leading 0 when followed by a period.
+		// 浮点数只能在后面跟小数点时有前导零
 		return 0, 0
 	}
-	f64, err := strconv.ParseFloat(unsafeBytesToString(buf[:pos]), 64)
+	f64, err := strconv.ParseFloat(unsafeBytesToString(buf[:pos]), 64) // 尝试解析为浮点数
 	if err == nil {
-		return floatTag, math.Float64bits(f64)
+		return floatTag, math.Float64bits(f64) // 返回浮点数标记和位表示
 	}
-	return 0, 0
+	return 0, 0 // 如果解析失败，返回 0
 }
 
-// unsafeBytesToString should only be used when we have control of b.
+// unsafeBytesToString 仅在我们控制 b 时使用。
 func unsafeBytesToString(b []byte) (s string) {
-	var length = len(b)
+	var length = len(b) // 获取字节数组的长度
 
 	if length == 0 {
-		return ""
+		return "" // 如果长度为 0，返回空字符串
 	}
 
+	// 使用反射将字节数组转换为字符串
 	stringHeader := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	stringHeader.Data = uintptr(unsafe.Pointer(&b[0]))
-	stringHeader.Len = length
-	return s
+	stringHeader.Data = uintptr(unsafe.Pointer(&b[0])) // 设置字符串数据指针
+	stringHeader.Len = length                          // 设置字符串长度
+	return s                                           // 返回字符串
 }

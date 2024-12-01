@@ -506,22 +506,27 @@ func BenchmarkNdjsonWarmCountStar(b *testing.B) {
 }
 
 func BenchmarkNdjsonWarmCountStarWithWhere(b *testing.B) {
+	// 检查主机 CPU 是否支持所需的特性
 	if !SupportedCPU() {
-		b.SkipNow()
+		b.SkipNow() // 如果不支持，跳过基准测试
 	}
 
+	// 加载测试数据文件
 	ndjson := loadFile("testdata/parking-citations-1M.json.zst")
 
+	// 解析 NDJSON 数据
 	pj, err := ParseND(ndjson, nil)
 	if err != nil {
-		b.Fatal(err)
+		b.Fatal(err) // 如果解析失败，报告致命错误
 	}
 
+	// 运行基准测试
 	b.Run("iter", func(b *testing.B) {
-		b.SetBytes(int64(len(ndjson)))
-		b.ReportAllocs()
-		b.ResetTimer()
+		b.SetBytes(int64(len(ndjson))) // 设置基准测试的字节数
+		b.ReportAllocs()               // 报告内存分配情况
+		b.ResetTimer()                 // 重置基准测试计时器
 		for i := 0; i < b.N; i++ {
+			// 统计满足条件的元素数量
 			countWhere("Make", "HOND", *pj)
 		}
 	})
